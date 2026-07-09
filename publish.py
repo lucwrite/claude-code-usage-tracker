@@ -1,8 +1,10 @@
 """Publishes the dashboard to the hosted Vercel wrapper (~/claude-usage-dashboard).
 
-That project is a thin, password-gated Next.js app whose only job is to
-serve whatever HTML file sits in its data/ folder from behind the login
-cookie. This module writes the freshly-generated dashboard there and
+That project is a thin Next.js app whose only job is to serve whatever
+HTML file sits in its public/ folder -- publicly accessible, no
+password (removed on request; the data here was assessed as low-
+sensitivity: usage volume/cost/timing, never conversation content).
+This module writes the freshly-generated dashboard there and
 (optionally) triggers a production deploy -- ccusage itself only reads
 local session logs, so there's no way for a hosted server to fetch this
 data on its own; publishing is how a snapshot gets there.
@@ -17,7 +19,7 @@ from snapshot import DEFAULT_DB_PATH
 from web import generate
 
 HOSTED_PROJECT_DIR = Path.home() / "claude-usage-dashboard"
-HOSTED_DATA_PATH = HOSTED_PROJECT_DIR / "data" / "report.html"
+HOSTED_DATA_PATH = HOSTED_PROJECT_DIR / "public" / "report.html"
 
 
 class PublishError(Exception):

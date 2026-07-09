@@ -27,6 +27,8 @@ from snapshot import DEFAULT_DB_PATH
 from strategy import evaluate_all
 
 OUTPUT_PATH = Path(__file__).parent / "report.html"
+METHODOLOGY_FILENAME = "methodology.html"
+METHODOLOGY_OUTPUT_PATH = Path(__file__).parent / METHODOLOGY_FILENAME
 
 ACCENT = "#5b9dff"
 GOOD = "#22c55e"
@@ -167,7 +169,164 @@ def _energy_section(daily_periods: list, dist, outliers) -> str:
     energy use per reply, so this borrows measurements from published research on other AI models and
     applies them to how much Claude wrote back to you (longer replies use more energy; how much you wrote
     to Claude barely matters, and reused context is close to free). Treat this as "roughly this ballpark,"
-    not a precise number.</p>'''
+    not a precise number. <a href="{METHODOLOGY_FILENAME}">Exactly how this is calculated, and the sources
+    it's drawn from &rarr;</a></p>'''
+
+
+def generate_methodology(output_path: Path = METHODOLOGY_OUTPUT_PATH) -> Path:
+    """A static writeup of the energy-estimate methodology and its sources.
+    Content here is fixed (not derived from usage_snapshots), so unlike
+    generate() there's no data to thread through -- it's regenerated
+    every time generate() runs purely to guarantee it always exists as a
+    sibling of report.html wherever that gets published, in sync with
+    whatever the current constants/logic in energy.py actually are."""
+    low_wh_per_1k, mid_wh_per_1k, high_wh_per_1k = estimate_for_output_tokens(1000)
+
+    html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>How the energy estimate works</title>
+<style>
+  :root {{
+    --bg: #0f1115; --paper: #171a21; --border: #262b36;
+    --ink: #e8e9ed; --muted: #8b8f9c; --accent: {ACCENT};
+  }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }}
+  .wrap {{ max-width: 700px; margin: 0 auto; padding: 36px 24px 70px; }}
+  a {{ color: var(--accent); text-decoration: none; }}
+  a:hover {{ text-decoration: underline; }}
+  .back {{ display: inline-block; font-size: 13px; margin-bottom: 22px; }}
+  h1 {{ font-size: 24px; margin: 0 0 6px; }}
+  .sub {{ color: var(--muted); font-size: 13px; margin: 0 0 32px; line-height: 1.6; }}
+  h2 {{ font-size: 15px; margin: 34px 0 12px; color: var(--ink); }}
+  p, li {{ font-size: 14.5px; line-height: 1.7; color: var(--ink); }}
+  p.muted {{ color: var(--muted); font-size: 13.5px; }}
+  .card {{ background: var(--paper); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; margin: 14px 0; }}
+  code {{ background: #0b0d11; border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; font-size: 13px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 10px 0; }}
+  th, td {{ text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }}
+  th {{ color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }}
+  td.num {{ font-variant-numeric: tabular-nums; }}
+  ol.sources {{ padding-left: 20px; }}
+  ol.sources li {{ margin-bottom: 14px; }}
+  .caveat {{ border-left: 3px solid {WARNING}; background: rgba(245,166,35,0.08); border-radius: 8px; padding: 14px 16px; margin: 20px 0; }}
+  .caveat p {{ margin: 0; }}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="report.html">&larr; Back to dashboard</a>
+  <h1>How the energy estimate works</h1>
+  <p class="sub">This page exists because "roughly this many Wh" deserves to show its work. Everything below
+  is exactly what the code does &mdash; no rounding of the explanation to make it sound more precise than it is.</p>
+
+  <div class="caveat">
+    <p><strong>The short version:</strong> Anthropic doesn't publish Claude's model architecture, hardware, or
+    serving setup, so there is no way for anyone outside Anthropic to compute a real Claude-specific
+    energy figure. Every number on the dashboard's Energy estimate section is a proxy: measurements from
+    published research on <em>other</em>, openly-benchmarked models, applied to your own token counts as an
+    order-of-magnitude stand-in. Treat it as "roughly this ballpark," never as a bill.</p>
+  </div>
+
+  <h2>1. Where the underlying usage numbers come from</h2>
+  <p>Token counts and cost figures come from <code>ccusage</code>, a local CLI that reads Claude Code's own
+  session logs on your machine &mdash; nothing is scraped from Anthropic's servers, and nothing about the
+  content of your conversations is read, only the token/cost metadata each session already records. This
+  tool snapshots that output into a local SQLite database each time you run <code>sync</code>, which is what
+  lets it show trends over time even though <code>ccusage</code> itself is stateless.</p>
+
+  <h2>2. Why the estimate uses output tokens only</h2>
+  <p>A request to an LLM has two phases: <strong>prefill</strong> (processing what you and any reused context
+  send in) and <strong>decode</strong> (generating the reply, one token at a time). These cost very
+  different amounts of energy. The paper "Where Do the Joules Go? Diagnosing Inference Energy Consumption"
+  measured prefill at <strong>&le;3.4%</strong> of total inference energy and decode at <strong>&ge;96%</strong>
+  &mdash; generating output dominates. That's why this tool's estimate is driven entirely by
+  <code>output_tokens</code> and deliberately ignores <code>input_tokens</code>, <code>cache_read_tokens</code>,
+  and <code>cache_creation_tokens</code>. Applying the same per-token rate to those would substantially
+  overstate energy use, especially for the very common case of a cache-heavy session (context Claude reused
+  instead of reprocessing costs close to nothing by comparison).</p>
+
+  <h2>3. The joules-per-token rate</h2>
+  <p>Recent benchmarking papers report measured energy per output token ranging roughly
+  <strong>0.39 J/token</strong> (e.g. LLaMA3-70B on an H100 in FP8 &mdash; efficient, modern serving) up to
+  <strong>7.2 J/token</strong> (older or larger models, less optimized serving) &mdash; almost a 20x spread
+  driven purely by hardware and serving choices. Rather than pick one number and imply false precision, this
+  tool anchors a low/mid/high range directly to that measured spread:</p>
+
+  <div class="card">
+    <table>
+      <tr><th>Estimate</th><th>Joules / output token</th><th>Wh per 1,000 output tokens</th></tr>
+      <tr><td>Low</td><td class="num">0.39 J</td><td class="num">{low_wh_per_1k:.3f} Wh</td></tr>
+      <tr><td>Mid</td><td class="num">2.0 J</td><td class="num">{mid_wh_per_1k:.3f} Wh</td></tr>
+      <tr><td>High</td><td class="num">7.2 J</td><td class="num">{high_wh_per_1k:.3f} Wh</td></tr>
+    </table>
+  </div>
+
+  <p>The conversion from joules to the watt-hours (Wh) shown on the dashboard is just unit conversion:</p>
+  <div class="card"><p style="margin:0;"><code>Wh = (output_tokens &times; joules_per_token) / 3600</code></p></div>
+  <p class="muted">3600 is simply the number of joules in one watt-hour &mdash; there's no research judgment
+  in that step, it's a fixed physical conversion.</p>
+
+  <h2>4. How this rolls up into what you see on the dashboard</h2>
+  <p>Every energy figure on the dashboard &mdash; the per-day/week/month "~X Wh" next to each usage bar, the
+  "typical conversation" vs. "your longest conversation" comparison, the per-outlier Wh next to each
+  unusually-long conversation, and the running lifetime low/mid/high total &mdash; all call the exact same
+  function on a different slice of your <code>output_tokens</code>: one conversation's worth, one day's
+  worth, or everything ever tracked. There's a single code path, just applied at different granularities, so
+  the numbers stay internally consistent with each other.</p>
+  <p>The "smartphone charges" and "10W LED bulb hours" comparisons are separate, commonly-used rough
+  reference points for energy communication (a phone charge &asymp; 15 Wh; a 10W bulb uses 10 Wh per hour)
+  &mdash; included only for intuition, not as another research-derived figure.</p>
+
+  <h2>5. Sources</h2>
+  <ol class="sources">
+    <li>Luccioni, A., Jernite, Y., &amp; Strubell, E. (2024).
+      <a href="https://arxiv.org/abs/2311.16863" target="_blank" rel="noopener">"Power Hungry Processing:
+      Watts Driving the Cost of AI Deployment?"</a> ACM Conference on Fairness, Accountability, and
+      Transparency (FAccT 2024). Peer-reviewed measurement of real-world inference energy costs across
+      open models &mdash; the source for the general "generation costs far more than input processing"
+      finding this tool relies on.</li>
+    <li>"Where Do the Joules Go? Diagnosing Inference Energy Consumption" (2026).
+      <a href="https://arxiv.org/pdf/2601.22076" target="_blank" rel="noopener">arXiv:2601.22076</a>.
+      The specific &le;3.4% prefill / &ge;96% decode split cited above comes from this paper.</li>
+    <li>"Beyond Test-Time Compute Strategies: Advocating Energy-per-Token in LLM Inference."
+      <a href="https://arxiv.org/pdf/2603.20224" target="_blank" rel="noopener">arXiv:2603.20224</a>.
+      Contributes to the measured joules-per-output-token range this tool's low/mid/high constants are
+      anchored to.</li>
+    <li>"TokenPowerBench: Benchmarking the Power Consumption of LLM Inference."
+      <a href="https://arxiv.org/html/2512.03024v1" target="_blank" rel="noopener">arXiv:2512.03024</a>.
+      Benchmark data across model sizes/hardware, also feeding the low/mid/high spread.</li>
+  </ol>
+
+  <h2>6. What this deliberately is not</h2>
+  <ul>
+    <li><strong>Not Claude-specific.</strong> None of the source papers benchmark Claude itself &mdash;
+    Anthropic hasn't published the figures that would make that possible. This is the best available proxy,
+    not a measurement of Anthropic's actual infrastructure.</li>
+    <li><strong>Not a bill.</strong> Nothing here corresponds to money, carbon offsets, or any number
+    Anthropic reports. It's a rough physical-energy estimate only.</li>
+    <li><strong>Not per-conversation ground truth.</strong> Real energy use depends on hardware, batching,
+    data-center efficiency (PUE), and cooling &mdash; none of which are knowable from the outside. The
+    low/mid/high range exists specifically so a single number doesn't get mistaken for a precise one.</li>
+  </ul>
+
+  <p class="muted" style="margin-top:36px;">Source code for this whole tool, including <code>energy.py</code>
+  where these constants live, is open on GitHub:
+  <a href="https://github.com/lucwrite/claude-code-usage-tracker" target="_blank" rel="noopener">lucwrite/claude-code-usage-tracker</a>.</p>
+</div>
+</body>
+</html>
+'''
+
+    output_path.write_text(html)
+    return output_path
 
 
 def generate(
@@ -260,6 +419,8 @@ def generate(
   .rec-critical .rec-badge {{ background: rgba(239,68,68,0.15); color: {CRITICAL}; }}
 
   .energy-note {{ margin-top: 12px; font-size: 13px; color: var(--muted); line-height: 1.6; }}
+  a {{ color: var(--accent); text-decoration: none; }}
+  a:hover {{ text-decoration: underline; }}
   .empty {{ color: var(--muted); font-size: 13px; }}
 </style>
 </head>
@@ -319,6 +480,7 @@ def generate(
 '''
 
     output_path.write_text(html)
+    generate_methodology(output_path.parent / METHODOLOGY_FILENAME)
     return output_path
 
 

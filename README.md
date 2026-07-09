@@ -75,6 +75,7 @@ python3 cli.py sync                          # fetch + snapshot latest data
 python3 cli.py report                        # daily view
 python3 cli.py report --granularity week     # or month
 python3 cli.py report --weekly-limit 150     # turn on the budget-alarm rule
+python3 cli.py report --energy               # rough energy-use estimate (see below)
 ```
 
 `sync` is idempotent (safe to run as often as you like -- re-running it
@@ -99,6 +100,25 @@ duplicating rows).
    those metrics, each producing a plain-language recommendation. Adding a
    rule is just adding a function with the same shape.
 5. **`cli.py`** -- ties it together into `sync`/`report` subcommands.
+6. **`energy.py`** (opt-in via `--energy`) -- a rough energy-use estimate.
+   Anthropic doesn't disclose Claude's architecture or hardware, so there's
+   no way to compute a real Claude-specific figure -- this applies a
+   joules-per-output-token rate from published research on *other* models
+   to your output token counts, as an order-of-magnitude proxy. Shows a
+   low/mid/high range (0.39-7.2 J/token, an ~18x spread across measured
+   hardware/model sizes) rather than a single falsely-precise number.
+   Deliberately excludes input/cache tokens from the estimate, since the
+   source research found prefill is <=3.4% of real inference energy versus
+   >=96% for decode (output generation). Sources:
+   - Luccioni, Jernite & Strubell, ["Power Hungry Processing: Watts Driving
+     the Cost of AI Deployment?"](https://arxiv.org/abs/2311.16863),
+     ACM FAccT 2024.
+   - ["Where Do the Joules Go? Diagnosing Inference Energy
+     Consumption"](https://arxiv.org/pdf/2601.22076) (2026).
+   - ["Beyond Test-Time Compute Strategies: Advocating Energy-per-Token in
+     LLM Inference"](https://arxiv.org/pdf/2603.20224).
+   - [TokenPowerBench: Benchmarking the Power Consumption of LLM
+     Inference](https://arxiv.org/html/2512.03024v1).
 
 ## What ccusage doesn't expose
 

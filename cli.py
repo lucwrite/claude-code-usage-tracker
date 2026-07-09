@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from energy import energy_by_period, relatable_comparison, total_energy
 from fetch import CcusageError, fetch_daily, fetch_sessions
 from metrics import (
     cache_efficiency_by_day,
@@ -102,6 +103,19 @@ def cmd_report(args: argparse.Namespace) -> int:
             if len(outliers) > 10:
                 print(f"... and {len(outliers) - 10} more")
 
+    if args.energy:
+        low, mid, high = total_energy(periods)
+        print(f"\n=== Estimated energy (rough, NOT Claude-specific -- see README) ===")
+        print(f"Low estimate:   {low:,.1f} Wh  ({relatable_comparison(low)})")
+        print(f"Mid estimate:   {mid:,.1f} Wh  ({relatable_comparison(mid)})")
+        print(f"High estimate:  {high:,.1f} Wh  ({relatable_comparison(high)})")
+        print(
+            "Derived from published research on OTHER models' measured joules-per-output-token\n"
+            "(0.39-7.2 J/token range); input/cache tokens excluded from the estimate since\n"
+            "research found they're <=3.4% of real inference energy. This is an order-of-\n"
+            "magnitude proxy, not a measurement of Claude's actual energy use."
+        )
+
     recs = evaluate_all(weekly_limit_usd=args.weekly_limit)
     print(f"\n=== Recommendations ({len(recs)}) ===")
     if not recs:
@@ -126,6 +140,10 @@ def main() -> None:
     p_report = sub.add_parser("report", help="Show metrics and recommendations")
     p_report.add_argument("--granularity", choices=["day", "week", "month"], default="day")
     p_report.add_argument("--weekly-limit", type=float, default=None, help="Your weekly $ budget")
+    p_report.add_argument(
+        "--energy", action="store_true",
+        help="Show a rough, non-Claude-specific energy-use estimate (see README for sourcing/caveats)",
+    )
     p_report.set_defaults(func=cmd_report)
 
     args = parser.parse_args()

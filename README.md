@@ -72,11 +72,19 @@ alias ccsync='python3 /path/to/claude-code-usage-tracker/cli.py sync'
 
 ```bash
 python3 cli.py sync                          # fetch + snapshot latest data
-python3 cli.py report                        # daily view
+python3 cli.py report                        # daily view (terminal)
 python3 cli.py report --granularity week     # or month
 python3 cli.py report --weekly-limit 150     # turn on the budget-alarm rule
 python3 cli.py report --energy               # rough energy-use estimate (see below)
+python3 cli.py dashboard                     # HTML version, opens in your browser
+python3 cli.py dashboard --weekly-limit 150  # same flag works here too
 ```
+
+`dashboard` renders the same data as `report` -- tabbed day/week/month view,
+cache efficiency, session outliers, recommendations, collapsible energy
+estimate -- as a static HTML file (`report.html`) and opens it in your
+default browser. No server, no new dependencies (`webbrowser` is stdlib);
+it's regenerated fresh every time you run the command.
 
 `sync` is idempotent (safe to run as often as you like -- re-running it
 updates today's/any in-progress session's numbers in place rather than
@@ -99,8 +107,11 @@ duplicating rows).
 4. **`strategy.py`** -- a small list of rule functions evaluated against
    those metrics, each producing a plain-language recommendation. Adding a
    rule is just adding a function with the same shape.
-5. **`cli.py`** -- ties it together into `sync`/`report` subcommands.
-6. **`energy.py`** (opt-in via `--energy`) -- a rough energy-use estimate.
+5. **`cli.py`** -- ties it together into `sync`/`report`/`dashboard` subcommands.
+6. **`web.py`** -- renders the same data as `report` into a static,
+   self-contained HTML file and opens it in your browser (`dashboard`
+   subcommand). No server; regenerated fresh each run.
+7. **`energy.py`** (opt-in via `--energy`) -- a rough energy-use estimate.
    Anthropic doesn't disclose Claude's architecture or hardware, so there's
    no way to compute a real Claude-specific figure -- this applies a
    joules-per-output-token rate from published research on *other* models

@@ -22,6 +22,7 @@ from metrics import (
 )
 from snapshot import DEFAULT_DB_PATH, snapshot_daily, snapshot_sessions
 from strategy import evaluate_all
+from web import generate_and_open
 
 
 def _print_table(headers: list[str], rows: list[tuple]) -> None:
@@ -130,6 +131,12 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    path = generate_and_open(weekly_limit_usd=args.weekly_limit)
+    print(f"Dashboard written to {path} and opened in your browser.")
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="cli.py", description="Claude Code usage tracker")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -145,6 +152,10 @@ def main() -> None:
         help="Show a rough, non-Claude-specific energy-use estimate (see README for sourcing/caveats)",
     )
     p_report.set_defaults(func=cmd_report)
+
+    p_dashboard = sub.add_parser("dashboard", help="Generate an HTML dashboard and open it in your browser")
+    p_dashboard.add_argument("--weekly-limit", type=float, default=None, help="Your weekly $ budget")
+    p_dashboard.set_defaults(func=cmd_dashboard)
 
     args = parser.parse_args()
     sys.exit(args.func(args))

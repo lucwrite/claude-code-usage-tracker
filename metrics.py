@@ -67,7 +67,14 @@ _GRANULARITY_EXPR = {
 
 
 def _connect(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
+    # Ensures the table exists even if this is the very first thing run
+    # against a fresh DB (e.g. `report`/`dashboard` before `sync` has ever
+    # run once) -- without this, every query below fails with
+    # "no such table: usage_snapshots" instead of returning an empty list.
+    from snapshot import SCHEMA
+
     conn = sqlite3.connect(db_path)
+    conn.executescript(SCHEMA)
     conn.row_factory = sqlite3.Row
     return conn
 

@@ -163,7 +163,7 @@ def rule_approaching_weekly_limit(
     knowable from usage_snapshots, and neither ccusage nor this tool can
     see your actual plan entitlement. This rule is just a self-chosen
     budget alarm; no default, no-op until you pass a number in."""
-    if weekly_limit_usd is None:
+    if weekly_limit_usd is None or weekly_limit_usd <= 0:
         return []
 
     weeks = tokens_by_period("week", db_path)

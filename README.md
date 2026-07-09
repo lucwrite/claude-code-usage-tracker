@@ -69,14 +69,15 @@ alias ccsync='python3 /path/to/claude-code-usage-tracker/cli.py sync'
 alias ccdashboard='python3 /path/to/claude-code-usage-tracker/cli.py dashboard'
 ```
 
-### Optional: host a live, password-protected version
+### Optional: host a live version
 
 `ccusage` only reads local session logs, so a cloud server can't fetch this
 data on its own -- "hosted" here means *publishing a snapshot*, not a truly
 real-time feed. Set up the companion
 [`claude-usage-dashboard`](https://github.com/lucwrite/claude-usage-dashboard)
-project (a thin, password-gated Next.js app -- **keep that repo private**,
-since its password lives in the source), then:
+project (a thin Next.js app that serves whatever's published, publicly --
+no password; the data it shows is usage volume/cost/timing only, assessed
+as low-sensitivity since it never includes conversation content), then:
 
 ```bash
 python3 cli.py publish                # writes + deploys to production
@@ -96,9 +97,9 @@ python3 cli.py dashboard --weekly-limit 150  # same flag works here too
 ```
 
 `dashboard` renders the same data as `report` -- tabbed day/week/month view,
-cache efficiency, session outliers, recommendations, collapsible energy
-estimate -- as a static HTML file (`report.html`) and opens it in your
-default browser. No server, no new dependencies (`webbrowser` is stdlib);
+cache efficiency, session outliers, recommendations, an energy estimate --
+as a static HTML file (`report.html`) and opens it in your default browser.
+No server, no new dependencies (`webbrowser` is stdlib);
 it's regenerated fresh every time you run the command.
 
 `sync` is idempotent (safe to run as often as you like -- re-running it
@@ -127,8 +128,8 @@ duplicating rows).
    self-contained HTML file and opens it in your browser (`dashboard`
    subcommand). No server; regenerated fresh each run.
 7. **`publish.py`** (`publish` subcommand) -- writes that same HTML into the
-   companion `claude-usage-dashboard` project's `data/` folder and runs
-   `vercel --prod` there, so the hosted, password-gated version updates.
+   companion `claude-usage-dashboard` project's `public/` folder and runs
+   `vercel --prod` there, so the hosted version updates.
 8. **`energy.py`** (opt-in via `--energy`) -- a rough energy-use estimate.
    Anthropic doesn't disclose Claude's architecture or hardware, so there's
    no way to compute a real Claude-specific figure -- this applies a

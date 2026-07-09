@@ -32,7 +32,10 @@ def publish(weekly_limit_usd: float | None = None, db_path: Path = DEFAULT_DB_PA
             f"{HOSTED_PROJECT_DIR} doesn't exist -- the hosted wrapper project must be set up first."
         )
     HOSTED_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-    generate(weekly_limit_usd=weekly_limit_usd, db_path=db_path, output_path=HOSTED_DATA_PATH)
+    try:
+        generate(weekly_limit_usd=weekly_limit_usd, db_path=db_path, output_path=HOSTED_DATA_PATH)
+    except Exception as e:
+        raise PublishError(f"failed to generate the dashboard: {e}") from e
 
     if not deploy:
         return HOSTED_DATA_PATH

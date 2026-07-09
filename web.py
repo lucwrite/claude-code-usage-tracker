@@ -248,8 +248,8 @@ def generate(
   .bar-value {{ font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }}
   @media (max-width: 620px) {{ .bar-row {{ grid-template-columns: 1fr; gap: 2px; }} .bar-value {{ text-align: left; }} }}
 
-  .rec-list {{ list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }}
-  .rec {{ font-size: 13.5px; line-height: 1.5; padding: 10px 14px; border-radius: 8px; border-left: 3px solid var(--border); background: #0b0d11; }}
+  .rec-list {{ list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }}
+  .rec {{ font-size: 13px; line-height: 1.4; padding: 7px 12px; border-radius: 8px; border-left: 3px solid var(--border); background: #0b0d11; }}
   .rec-warning {{ border-left-color: {WARNING}; }}
   .rec-critical {{ border-left-color: {CRITICAL}; }}
   .rec-badge {{

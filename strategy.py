@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import date as _date
 from pathlib import Path
 
+from energy import estimate_for_output_tokens
 from metrics import (
     cache_efficiency_by_day,
     cache_efficiency_by_session,
@@ -72,21 +73,44 @@ def rule_low_cache_reuse(
 
 # --- Rule 2: session outliers ------------------------------------------
 
-def rule_session_outliers(db_path: Path = DEFAULT_DB_PATH, threshold: float = 2.0) -> list[Recommendation]:
+def rule_session_outliers(
+    db_path: Path = DEFAULT_DB_PATH, threshold: float = 2.0, max_individual: int = 3
+) -> list[Recommendation]:
     """Flags sessions whose total tokens exceed `threshold`x the median
     session. The median is recomputed from current data each call, so it
-    naturally shifts as history grows -- not a fixed/hardcoded baseline."""
-    return [
-        Recommendation(
+    naturally shifts as history grows -- not a fixed/hardcoded baseline.
+    Only the `max_individual` worst offenders get their own message (a
+    long history can have a dozen+ outliers, and repeating near-identical
+    cards for all of them buries the actionable ones) -- the rest are
+    folded into a single summary line. The full list still exists in the
+    "Your conversations" section, so nothing is lost, just not repeated."""
+    outliers = session_outliers(threshold, db_path)
+    if not outliers:
+        return []
+
+    recs = []
+    for o in outliers[:max_individual]:
+        _, mid_wh, _ = estimate_for_output_tokens(o.output_tokens)
+        recs.append(Recommendation(
             rule="session_outlier",
             severity="warning",
             message=f"The conversation on {_friendly_date(o.date)} ran about {o.ratio_to_median:.0f}x longer "
-                     f"than a typical one for you ({o.total_tokens:,} tokens) — for unrelated tasks, starting "
-                     f"a fresh conversation instead of one long thread tends to use less",
+                     f"than a typical one for you ({o.total_tokens:,} tokens, ~{mid_wh:,.1f} Wh) — for unrelated "
+                     f"tasks, starting a fresh conversation instead of one long thread tends to use less",
             context={"session_id": o.session_id, "date": o.date, "ratio": o.ratio_to_median},
-        )
-        for o in session_outliers(threshold, db_path)
-    ]
+        ))
+
+    rest = outliers[max_individual:]
+    if rest:
+        extra_wh = sum(estimate_for_output_tokens(o.output_tokens)[1] for o in rest)
+        recs.append(Recommendation(
+            rule="session_outlier_summary",
+            severity="info",
+            message=f"{len(rest)} more conversation{'s' if len(rest) != 1 else ''} also ran unusually long "
+                     f"(~{extra_wh:,.1f} Wh combined) — see \"Your conversations\" below for the full list",
+            context={"count": len(rest)},
+        ))
+    return recs
 
 
 # --- Rule 3: cost rising without better cache efficiency ---------------

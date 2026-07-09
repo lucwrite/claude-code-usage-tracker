@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+usage.db
+test_usage.db
+sync.log
+sync.error.log

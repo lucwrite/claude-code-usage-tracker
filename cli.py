@@ -20,6 +20,7 @@ from metrics import (
     session_token_distribution,
     tokens_by_period,
 )
+from publish import PublishError, publish
 from snapshot import DEFAULT_DB_PATH, snapshot_daily, snapshot_sessions
 from strategy import evaluate_all
 from web import generate_and_open
@@ -137,6 +138,17 @@ def cmd_dashboard(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_publish(args: argparse.Namespace) -> int:
+    print("Publishing to the hosted dashboard..." + (" (skipping deploy)" if args.no_deploy else ""))
+    try:
+        path = publish(weekly_limit_usd=args.weekly_limit, deploy=not args.no_deploy)
+    except PublishError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    print(f"Wrote {path}" + ("" if args.no_deploy else " and deployed to production."))
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="cli.py", description="Claude Code usage tracker")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -156,6 +168,11 @@ def main() -> None:
     p_dashboard = sub.add_parser("dashboard", help="Generate an HTML dashboard and open it in your browser")
     p_dashboard.add_argument("--weekly-limit", type=float, default=None, help="Your weekly $ budget")
     p_dashboard.set_defaults(func=cmd_dashboard)
+
+    p_publish = sub.add_parser("publish", help="Push the dashboard to the hosted (Vercel) version")
+    p_publish.add_argument("--weekly-limit", type=float, default=None, help="Your weekly $ budget")
+    p_publish.add_argument("--no-deploy", action="store_true", help="Write the file but skip the vercel deploy")
+    p_publish.set_defaults(func=cmd_publish)
 
     args = parser.parse_args()
     sys.exit(args.func(args))

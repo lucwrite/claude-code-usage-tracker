@@ -66,6 +66,21 @@ Add to your `~/.zshrc` (adjust the path):
 alias ccreport='python3 /path/to/claude-code-usage-tracker/cli.py report'
 alias ccreport-week='python3 /path/to/claude-code-usage-tracker/cli.py report --granularity week'
 alias ccsync='python3 /path/to/claude-code-usage-tracker/cli.py sync'
+alias ccdashboard='python3 /path/to/claude-code-usage-tracker/cli.py dashboard'
+```
+
+### Optional: host a live, password-protected version
+
+`ccusage` only reads local session logs, so a cloud server can't fetch this
+data on its own -- "hosted" here means *publishing a snapshot*, not a truly
+real-time feed. Set up the companion
+[`claude-usage-dashboard`](https://github.com/lucwrite/claude-usage-dashboard)
+project (a thin, password-gated Next.js app -- **keep that repo private**,
+since its password lives in the source), then:
+
+```bash
+python3 cli.py publish                # writes + deploys to production
+python3 cli.py publish --no-deploy    # just write the file, skip vercel deploy
 ```
 
 ## Usage
@@ -107,11 +122,14 @@ duplicating rows).
 4. **`strategy.py`** -- a small list of rule functions evaluated against
    those metrics, each producing a plain-language recommendation. Adding a
    rule is just adding a function with the same shape.
-5. **`cli.py`** -- ties it together into `sync`/`report`/`dashboard` subcommands.
+5. **`cli.py`** -- ties it together into `sync`/`report`/`dashboard`/`publish` subcommands.
 6. **`web.py`** -- renders the same data as `report` into a static,
    self-contained HTML file and opens it in your browser (`dashboard`
    subcommand). No server; regenerated fresh each run.
-7. **`energy.py`** (opt-in via `--energy`) -- a rough energy-use estimate.
+7. **`publish.py`** (`publish` subcommand) -- writes that same HTML into the
+   companion `claude-usage-dashboard` project's `data/` folder and runs
+   `vercel --prod` there, so the hosted, password-gated version updates.
+8. **`energy.py`** (opt-in via `--energy`) -- a rough energy-use estimate.
    Anthropic doesn't disclose Claude's architecture or hardware, so there's
    no way to compute a real Claude-specific figure -- this applies a
    joules-per-output-token rate from published research on *other* models

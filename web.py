@@ -132,7 +132,9 @@ def _energy_section() -> str:
     not a precise number.</p>'''
 
 
-def generate(weekly_limit_usd: float | None = None, db_path: Path = DEFAULT_DB_PATH) -> Path:
+def generate(
+    weekly_limit_usd: float | None = None, db_path: Path = DEFAULT_DB_PATH, output_path: Path = OUTPUT_PATH
+) -> Path:
     daily = tokens_by_period("day", db_path)
     weekly = tokens_by_period("week", db_path)
     monthly = tokens_by_period("month", db_path)
@@ -267,8 +269,8 @@ def generate(weekly_limit_usd: float | None = None, db_path: Path = DEFAULT_DB_P
 </html>
 '''
 
-    OUTPUT_PATH.write_text(html)
-    return OUTPUT_PATH
+    output_path.write_text(html)
+    return output_path
 
 
 def generate_and_open(weekly_limit_usd: float | None = None, db_path: Path = DEFAULT_DB_PATH) -> Path:

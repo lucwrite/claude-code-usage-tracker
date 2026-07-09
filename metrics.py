@@ -35,6 +35,7 @@ class PeriodUsage:
 @dataclass
 class CacheEfficiencyPoint:
     key: str  # date for the daily trend, session_id for per-session
+    date: str  # always populated, so session-level messages can reference a date, not just a raw id
     cache_read_tokens: int
     cache_creation_tokens: int
     efficiency: float | None  # None when a day/session had zero cache activity at all
@@ -112,7 +113,7 @@ def _cache_efficiency(kind: str, key_column: str, db_path: Path) -> list[CacheEf
     conn = _connect(db_path)
     try:
         rows = conn.execute(f"""
-            SELECT {key_column} AS key, cache_read_tokens, cache_creation_tokens
+            SELECT {key_column} AS key, date, cache_read_tokens, cache_creation_tokens
             FROM usage_snapshots
             WHERE kind = ?
             ORDER BY date
@@ -126,6 +127,7 @@ def _cache_efficiency(kind: str, key_column: str, db_path: Path) -> list[CacheEf
         efficiency = r["cache_read_tokens"] / total_cache if total_cache > 0 else None
         out.append(CacheEfficiencyPoint(
             key=r["key"],
+            date=r["date"],
             cache_read_tokens=r["cache_read_tokens"],
             cache_creation_tokens=r["cache_creation_tokens"],
             efficiency=efficiency,

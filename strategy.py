@@ -22,6 +22,16 @@ from metrics import (
 from snapshot import DEFAULT_DB_PATH
 
 
+def _friendly_date(iso_date: str) -> str:
+    """"2026-07-07" -> "Jul 7" -- keeps message text plain-language
+    consistent with the dashboard, which uses the same format."""
+    try:
+        y, m, d = (int(x) for x in iso_date.split("-"))
+        return _date(y, m, d).strftime("%b %-d")
+    except (ValueError, IndexError):
+        return iso_date
+
+
 @dataclass
 class Recommendation:
     rule: str
@@ -48,7 +58,9 @@ def rule_low_cache_reuse(
             recs.append(Recommendation(
                 rule="low_cache_reuse_day",
                 severity="warning",
-                message=f"Low cache reuse on {d.key} ({d.efficiency:.0%}) — consider fewer large context reloads",
+                message=f"On {_friendly_date(d.key)}, Claude only reused {d.efficiency:.0%} of earlier context "
+                         f"instead of reprocessing it fresh (usually 90%+) — reloading large files or docs "
+                         f"repeatedly in one sitting is the most common cause",
                 context={"date": d.key, "efficiency": d.efficiency},
             ))
 
@@ -57,8 +69,10 @@ def rule_low_cache_reuse(
             recs.append(Recommendation(
                 rule="low_cache_reuse_session",
                 severity="warning",
-                message=f"Low cache reuse in session {s.key[:8]}... ({s.efficiency:.0%}) — consider fewer large context reloads",
-                context={"session_id": s.key, "efficiency": s.efficiency},
+                message=f"A conversation on {_friendly_date(s.date)} only reused {s.efficiency:.0%} of earlier "
+                         f"context instead of reprocessing it fresh (usually 90%+) — reloading large files or "
+                         f"docs repeatedly in one sitting is the most common cause",
+                context={"session_id": s.key, "date": s.date, "efficiency": s.efficiency},
             ))
 
     return recs
@@ -74,8 +88,9 @@ def rule_session_outliers(db_path: Path = DEFAULT_DB_PATH, threshold: float = 2.
         Recommendation(
             rule="session_outlier",
             severity="warning",
-            message=f"Session {o.session_id[:8]}... on {o.date} used {o.total_tokens:,} tokens "
-                     f"({o.ratio_to_median}x the median) — consider splitting into smaller tasks",
+            message=f"The conversation on {_friendly_date(o.date)} ran about {o.ratio_to_median:.0f}x longer "
+                     f"than a typical one for you ({o.total_tokens:,} tokens) — for unrelated tasks, starting "
+                     f"a fresh conversation instead of one long thread tends to use less",
             context={"session_id": o.session_id, "date": o.date, "ratio": o.ratio_to_median},
         )
         for o in session_outliers(threshold, db_path)
@@ -118,8 +133,9 @@ def rule_cost_trending_up(
     return [Recommendation(
         rule="cost_trending_up",
         severity="warning",
-        message=f"Est. API cost rose {cost_change:.0%} week-over-week (${prev_week.cost_usd:.2f} → ${last_week.cost_usd:.2f}) "
-                 f"without better cache reuse ({prev_eff:.0%} → {last_eff:.0%}) — review recent sessions",
+        message=f"Your usage value jumped {cost_change:.0%} from last week to this week "
+                 f"(${prev_week.cost_usd:.2f} → ${last_week.cost_usd:.2f}) without Claude reusing more "
+                 f"context to offset it — worth a quick look at what changed",
         context={"prev_week": prev_week.period, "last_week": last_week.period, "cost_change": cost_change},
     )]
 
@@ -161,8 +177,8 @@ def rule_approaching_weekly_limit(
     return [Recommendation(
         rule="approaching_weekly_limit",
         severity="warning" if fraction < 1.0 else "critical",
-        message=f"${current_week.cost_usd:.2f} (est. API-equivalent) of your ${weekly_limit_usd:.2f} "
-                 f"self-set weekly budget used ({fraction:.0%}) — pace remaining work",
+        message=f"You've used ${current_week.cost_usd:.2f} of the ${weekly_limit_usd:.2f} weekly budget "
+                 f"you set for yourself ({fraction:.0%}) — pace yourself for the rest of the week",
         context={"week": current_week.period, "spent": current_week.cost_usd, "limit": weekly_limit_usd},
     )]
 

@@ -74,6 +74,7 @@ class SessionDistribution:
     min_tokens: int
     max_tokens: int
     stdev_tokens: float
+    median_output_tokens: float  # for energy estimates, which are output-token-driven, not total-token-driven
 
 
 @dataclass
@@ -81,6 +82,7 @@ class SessionOutlier:
     session_id: str
     date: str
     total_tokens: int
+    output_tokens: int  # for a per-session energy estimate
     ratio_to_median: float
 
 
@@ -179,7 +181,7 @@ def _session_totals(db_path: Path) -> list[sqlite3.Row]:
     conn = _connect(db_path)
     try:
         return conn.execute("""
-            SELECT session_id, date,
+            SELECT session_id, date, output_tokens,
                    input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens AS total_tokens
             FROM usage_snapshots
             WHERE kind = 'session'
@@ -189,7 +191,8 @@ def _session_totals(db_path: Path) -> list[sqlite3.Row]:
 
 
 def session_token_distribution(db_path: Path = DEFAULT_DB_PATH) -> SessionDistribution | None:
-    totals = [r["total_tokens"] for r in _session_totals(db_path)]
+    rows = _session_totals(db_path)
+    totals = [r["total_tokens"] for r in rows]
     if not totals:
         return None
     return SessionDistribution(
@@ -199,6 +202,7 @@ def session_token_distribution(db_path: Path = DEFAULT_DB_PATH) -> SessionDistri
         min_tokens=min(totals),
         max_tokens=max(totals),
         stdev_tokens=statistics.stdev(totals) if len(totals) > 1 else 0.0,
+        median_output_tokens=statistics.median(r["output_tokens"] for r in rows),
     )
 
 
@@ -217,6 +221,7 @@ def session_outliers(threshold: float = 2.0, db_path: Path = DEFAULT_DB_PATH) ->
             session_id=r["session_id"],
             date=r["date"],
             total_tokens=r["total_tokens"],
+            output_tokens=r["output_tokens"],
             ratio_to_median=round(r["total_tokens"] / med, 2),
         )
         for r in rows

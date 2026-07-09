@@ -43,10 +43,11 @@ def _stat(value: str, label: str) -> str:
     return f'<div class="stat"><div class="stat-value">{value}</div><div class="stat-label">{label}</div></div>'
 
 
-def _bar_row(label: str, value: float, max_value: float, color: str, value_label: str) -> str:
+def _bar_row(label: str, value: float, max_value: float, color: str, value_label: str, wide_label: bool = False) -> str:
     pct = (value / max_value * 100) if max_value else 0
+    row_class = "bar-row bar-row--wide" if wide_label else "bar-row"
     return f'''
-    <div class="bar-row">
+    <div class="{row_class}">
       <span class="bar-label">{_esc(label)}</span>
       <div class="bar-track"><div class="bar-fill" style="width:{pct:.2f}%; background:{color};"></div></div>
       <span class="bar-value">{_esc(value_label)}</span>
@@ -81,15 +82,15 @@ def _cache_efficiency_section() -> str:
     return f'<div class="bars">{rows}</div>'
 
 
-def _conversations_section() -> str:
-    dist = session_token_distribution()
+def _conversations_section(dist, outliers) -> str:
     if not dist:
         return '<p class="empty">No conversations tracked yet.</p>'
-    outliers = session_outliers()
+    _, typical_mid_wh, _ = estimate_for_output_tokens(dist.median_output_tokens)
     stat_html = (
         '<div class="stat-row">'
         + _stat(str(dist.count), "Conversations tracked")
         + _stat(f"{dist.median_tokens:,.0f}", "Typical conversation size (tokens)")
+        + _stat(f"~{typical_mid_wh:,.1f} Wh", "Energy for a typical conversation")
         + _stat(str(len(outliers)), "Much longer than usual")
         + '</div>'
     )
@@ -97,10 +98,18 @@ def _conversations_section() -> str:
         return stat_html
     max_tokens = outliers[0].total_tokens
     rows = "".join(
-        _bar_row(_friendly_date(o.date), o.total_tokens, max_tokens, SERIES_2, f"{o.ratio_to_median:.0f}x typical size")
+        _bar_row(
+            _friendly_date(o.date), o.total_tokens, max_tokens, SERIES_2,
+            f"{o.ratio_to_median:.0f}x typical · ~{estimate_for_output_tokens(o.output_tokens)[1]:,.1f} Wh",
+        )
         for o in outliers[:15]
     )
-    return stat_html + f'<p class="section-note">Conversations that ran unusually long compared to your typical one:</p><div class="bars">{rows}</div>'
+    return (
+        stat_html
+        + '<p class="section-note">Conversations that ran unusually long compared to your typical one '
+          '(Wh is this tool\'s mid-range estimate for that specific conversation):</p>'
+        + f'<div class="bars">{rows}</div>'
+    )
 
 
 def _recommendations_section(weekly_limit_usd: float | None) -> str:
@@ -114,16 +123,45 @@ def _recommendations_section(weekly_limit_usd: float | None) -> str:
     return f'<ul class="rec-list">{items}</ul>'
 
 
-def _energy_section(daily_periods: list) -> str:
+def _energy_section(daily_periods: list, dist, outliers) -> str:
     low, mid, high = total_energy(daily_periods)
+    _, per_1k_mid, _ = estimate_for_output_tokens(1000)
+
+    # Concrete activities -> energy, using real examples from your own
+    # history where possible, so "what activity = what energy" has actual
+    # answers instead of only an abstract aggregate total.
+    activities: list[tuple[str, float]] = []
+    if dist:
+        _, typical_wh, _ = estimate_for_output_tokens(dist.median_output_tokens)
+        activities.append(("A typical conversation for you", typical_wh))
+    if outliers:
+        biggest = max(outliers, key=lambda o: o.output_tokens)
+        _, biggest_wh, _ = estimate_for_output_tokens(biggest.output_tokens)
+        activities.append((f"Your longest conversation ({_friendly_date(biggest.date)})", biggest_wh))
+
+    activity_html = ""
+    if activities:
+        max_wh = max(wh for _, wh in activities)
+        rows = "".join(
+            _bar_row(label, wh, max_wh, ACCENT, f"~{wh:,.1f} Wh", wide_label=True) for label, wh in activities
+        )
+        activity_html = f'''
+    <p class="section-note">What specific activities cost, roughly (mid-range estimate):</p>
+    <div class="bars">{rows}</div>
+    <p class="section-note" style="margin-top:14px;">As a flat rate: roughly {per_1k_mid:.2f} Wh per 1,000 words
+    Claude writes back to you (a few paragraphs) &mdash; the length of Claude's <em>reply</em> is what drives
+    this estimate. How much you type barely matters, and reused context (checked/read, not regenerated)
+    is close to free.</p>'''
+
     stats = (
         _stat(f"{low:,.0f} Wh", f"Low estimate &middot; {_esc(relatable_comparison(low))}")
         + _stat(f"{mid:,.0f} Wh", f"Middle estimate &middot; {_esc(relatable_comparison(mid))}")
         + _stat(f"{high:,.0f} Wh", f"High estimate &middot; {_esc(relatable_comparison(high))}")
     )
-    return f'''
-    <p class="section-note">The "~X Wh" figure next to each bar above is a rough per-period estimate.
-    Totaled up across everything tracked:</p>
+    return f'''{activity_html}
+    <p class="section-note" style="margin-top:18px;">The "~X Wh" figure next to each bar in "How much you've
+    used" above is this same estimate applied to that whole day/week/month. Totaled up across everything
+    tracked:</p>
     <div class="stat-row">{stats}</div>
     <p class="energy-note">Why a range instead of one number: nobody outside Anthropic knows Claude's actual
     energy use per reply, so this borrows measurements from published research on other AI models and
@@ -143,6 +181,7 @@ def generate(
     total_cost = sum(p.cost_usd for p in daily)
     latest_eff = next((d.efficiency for d in reversed(cache_efficiency_by_day(db_path)) if d.efficiency is not None), None)
     dist = session_token_distribution(db_path)
+    outliers = session_outliers(db_path=db_path)
 
     now = datetime.now(timezone.utc)
     try:
@@ -202,6 +241,7 @@ def generate(
   .tabpanel.active {{ display: block; }}
 
   .bar-row {{ display: grid; grid-template-columns: 90px 1fr 150px; align-items: center; gap: 10px; margin: 7px 0; }}
+  .bar-row--wide {{ grid-template-columns: 220px 1fr 130px; }}
   .bar-label {{ font-size: 12.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
   .bar-track {{ background: #0b0d11; border: 1px solid var(--border); border-radius: 4px; height: 14px; overflow: hidden; }}
   .bar-fill {{ height: 100%; }}
@@ -255,13 +295,13 @@ def generate(
   </div>
 
   <h2>Your conversations</h2>
-  <div class="card">{_conversations_section()}</div>
+  <div class="card">{_conversations_section(dist, outliers)}</div>
 
   <h2>Ways to use less</h2>
   <div class="card">{_recommendations_section(weekly_limit_usd)}</div>
 
   <h2>Energy estimate</h2>
-  <div class="card">{_energy_section(daily)}</div>
+  <div class="card">{_energy_section(daily, dist, outliers)}</div>
 </div>
 
 <script>

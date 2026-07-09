@@ -12,11 +12,17 @@ counts) kept available for anyone who does want the detail.
 from __future__ import annotations
 
 import webbrowser
-from datetime import date as _date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from energy import estimate_for_output_tokens, relatable_comparison, total_energy
-from metrics import cache_efficiency_by_day, session_outliers, session_token_distribution, tokens_by_period
+from metrics import (
+    cache_efficiency_by_day,
+    friendly_date as _friendly_date,
+    session_outliers,
+    session_token_distribution,
+    tokens_by_period,
+)
 from snapshot import DEFAULT_DB_PATH
 from strategy import evaluate_all
 
@@ -33,14 +39,8 @@ def _esc(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _friendly_date(iso_date: str) -> str:
-    """"2026-07-07" -> "Jul 7". Falls back to the raw string for
-    non-day periods (week/month labels aren't plain calendar dates)."""
-    try:
-        y, m, d = (int(x) for x in iso_date.split("-"))
-        return _date(y, m, d).strftime("%b %-d")
-    except (ValueError, IndexError):
-        return iso_date
+def _stat(value: str, label: str) -> str:
+    return f'<div class="stat"><div class="stat-value">{value}</div><div class="stat-label">{label}</div></div>'
 
 
 def _bar_row(label: str, value: float, max_value: float, color: str, value_label: str) -> str:
@@ -87,11 +87,11 @@ def _conversations_section() -> str:
         return '<p class="empty">No conversations tracked yet.</p>'
     outliers = session_outliers()
     stat_html = (
-        f'<div class="stat-row">'
-        f'<div class="stat"><div class="stat-value">{dist.count}</div><div class="stat-label">Conversations tracked</div></div>'
-        f'<div class="stat"><div class="stat-value">{dist.median_tokens:,.0f}</div><div class="stat-label">Typical conversation size (tokens)</div></div>'
-        f'<div class="stat"><div class="stat-value">{len(outliers)}</div><div class="stat-label">Much longer than usual</div></div>'
-        f'</div>'
+        '<div class="stat-row">'
+        + _stat(str(dist.count), "Conversations tracked")
+        + _stat(f"{dist.median_tokens:,.0f}", "Typical conversation size (tokens)")
+        + _stat(str(len(outliers)), "Much longer than usual")
+        + '</div>'
     )
     if not outliers:
         return stat_html
@@ -114,17 +114,17 @@ def _recommendations_section(weekly_limit_usd: float | None) -> str:
     return f'<ul class="rec-list">{items}</ul>'
 
 
-def _energy_section() -> str:
-    periods = tokens_by_period("day")
-    low, mid, high = total_energy(periods)
+def _energy_section(daily_periods: list) -> str:
+    low, mid, high = total_energy(daily_periods)
+    stats = (
+        _stat(f"{low:,.0f} Wh", f"Low estimate &middot; {_esc(relatable_comparison(low))}")
+        + _stat(f"{mid:,.0f} Wh", f"Middle estimate &middot; {_esc(relatable_comparison(mid))}")
+        + _stat(f"{high:,.0f} Wh", f"High estimate &middot; {_esc(relatable_comparison(high))}")
+    )
     return f'''
     <p class="section-note">The "~X Wh" figure next to each bar above is a rough per-period estimate.
     Totaled up across everything tracked:</p>
-    <div class="stat-row">
-      <div class="stat"><div class="stat-value">{low:,.0f} Wh</div><div class="stat-label">Low estimate &middot; {_esc(relatable_comparison(low))}</div></div>
-      <div class="stat"><div class="stat-value">{mid:,.0f} Wh</div><div class="stat-label">Middle estimate &middot; {_esc(relatable_comparison(mid))}</div></div>
-      <div class="stat"><div class="stat-value">{high:,.0f} Wh</div><div class="stat-label">High estimate &middot; {_esc(relatable_comparison(high))}</div></div>
-    </div>
+    <div class="stat-row">{stats}</div>
     <p class="energy-note">Why a range instead of one number: nobody outside Anthropic knows Claude's actual
     energy use per reply, so this borrows measurements from published research on other AI models and
     applies them to how much Claude wrote back to you (longer replies use more energy; how much you wrote
@@ -144,7 +144,20 @@ def generate(
     latest_eff = next((d.efficiency for d in reversed(cache_efficiency_by_day(db_path)) if d.efficiency is not None), None)
     dist = session_token_distribution(db_path)
 
-    generated_at = datetime.now(timezone.utc).strftime("%b %-d, %Y at %H:%M UTC")
+    now = datetime.now(timezone.utc)
+    try:
+        generated_at = now.strftime("%b %-d, %Y at %H:%M UTC")
+    except ValueError:
+        # %-d (no-padding day) is glibc/macOS-only; fall back to the
+        # portable zero-padded form on platforms that don't support it.
+        generated_at = now.strftime("%b %d, %Y at %H:%M UTC")
+
+    summary_stats = (
+        _stat(f"{total_tokens:,}", "Total usage (tokens)")
+        + _stat(f"${total_cost:,.2f}", "What this would cost, per use")
+        + _stat(f"{latest_eff:.0%}" if latest_eff is not None else "n/a", "Context reused recently")
+        + _stat(f"{dist.median_tokens:,.0f}" if dist else "n/a", "Typical conversation size")
+    )
 
     html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -220,12 +233,7 @@ def generate(
   <div class="note">The dollar figures here are an estimate of what your usage would cost if you paid per use &mdash; not a real bill. If you're on a subscription plan, you pay the same price either way; think of this as a measure of how much you're using, not money spent.</div>
 
   <div class="card">
-    <div class="stat-row">
-      <div><div class="stat-value">{total_tokens:,}</div><div class="stat-label">Total usage (tokens)</div></div>
-      <div><div class="stat-value">${total_cost:,.2f}</div><div class="stat-label">What this would cost, per use</div></div>
-      <div><div class="stat-value">{f"{latest_eff:.0%}" if latest_eff is not None else "n/a"}</div><div class="stat-label">Context reused recently</div></div>
-      <div><div class="stat-value">{f"{dist.median_tokens:,.0f}" if dist else "n/a"}</div><div class="stat-label">Typical conversation size</div></div>
-    </div>
+    <div class="stat-row">{summary_stats}</div>
   </div>
 
   <h2>How much you've used</h2>
@@ -253,7 +261,7 @@ def generate(
   <div class="card">{_recommendations_section(weekly_limit_usd)}</div>
 
   <h2>Energy estimate</h2>
-  <div class="card">{_energy_section()}</div>
+  <div class="card">{_energy_section(daily)}</div>
 </div>
 
 <script>

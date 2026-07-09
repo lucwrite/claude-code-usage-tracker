@@ -16,9 +16,34 @@ from __future__ import annotations
 import sqlite3
 import statistics
 from dataclasses import dataclass
+from datetime import date as _date
 from pathlib import Path
 
 from snapshot import DEFAULT_DB_PATH
+
+
+def friendly_date(iso_date: str) -> str:
+    """"2026-07-07" -> "Jul 7". Falls back to the raw string for non-day
+    periods (week/month labels aren't plain calendar dates) and for any
+    platform where the no-padding %-d directive isn't supported (glibc/
+    macOS only -- this guards it rather than crashing on Windows).
+    Shared by web.py and strategy.py so the dashboard and the terminal/
+    recommendation text can't drift out of formatting sync."""
+    try:
+        y, m, d = (int(x) for x in iso_date.split("-"))
+        return _date(y, m, d).strftime("%b %-d")
+    except (ValueError, IndexError):
+        return iso_date
+
+
+def week_label(iso_date: str) -> str:
+    """The same week-bucket label tokens_by_period("week") groups by,
+    exposed so callers can match a specific date to its week."""
+    try:
+        y, m, d = (int(x) for x in iso_date.split("-"))
+        return _date(y, m, d).strftime("%Y-W%W")
+    except (ValueError, IndexError):
+        return iso_date
 
 
 @dataclass

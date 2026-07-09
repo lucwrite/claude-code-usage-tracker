@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from dataclasses import dataclass, field
 
 CCUSAGE_CMD = ["npx", "ccusage@latest"]
 CLAUDE_MODEL_PREFIX = "claude"
+CLAUDE_AGENT_NAME = "claude"
 
 
 class CcusageError(Exception):
@@ -95,23 +97,39 @@ def fetch_daily(since: str | None = None, until: str | None = None) -> list[Dail
 
     raw = _run_ccusage(*args)
     results: list[DailyUsage] = []
+    missing_breakdowns_field = sum(1 for entry in raw["daily"] if "modelBreakdowns" not in entry)
 
     for entry in raw["daily"]:
         claude_breakdowns = _claude_model_breakdowns(entry)
         if not claude_breakdowns:
             continue  # this day had only non-Claude agent activity
 
-        sums = _sum_claude_only(claude_breakdowns)
-        results.append(
-            DailyUsage(
-                date=entry["period"],
-                total_tokens=sums["input_tokens"]
-                + sums["output_tokens"]
-                + sums["cache_read_tokens"]
-                + sums["cache_creation_tokens"],
-                models_used=[m["modelName"] for m in claude_breakdowns],
-                **sums,
+        try:
+            sums = _sum_claude_only(claude_breakdowns)
+            results.append(
+                DailyUsage(
+                    date=entry["period"],
+                    total_tokens=sums["input_tokens"]
+                    + sums["output_tokens"]
+                    + sums["cache_read_tokens"]
+                    + sums["cache_creation_tokens"],
+                    models_used=[m["modelName"] for m in claude_breakdowns],
+                    **sums,
+                )
             )
+        except KeyError as e:
+            raise CcusageError(
+                f"ccusage daily output is missing an expected field ({e}) -- "
+                f"its JSON shape may have changed since this tool was built"
+            ) from e
+
+    if missing_breakdowns_field:
+        plural = "y" if missing_breakdowns_field == 1 else "ies"
+        print(
+            f"Warning: {missing_breakdowns_field} daily entr{plural} had no 'modelBreakdowns' field at all "
+            f"-- ccusage's output shape may have changed; Claude Code usage may be silently missing "
+            f"from this sync.",
+            file=sys.stderr,
         )
 
     return results
@@ -130,25 +148,47 @@ def fetch_sessions(since: str | None = None, until: str | None = None) -> list[S
 
     raw = _run_ccusage(*args)
     results: list[SessionUsage] = []
+    missing_agent_field = 0
 
     for entry in raw["session"]:
-        if entry.get("agent") != "claude":
+        if "agent" not in entry:
+            # Distinct from "agent present but not claude" (a normal,
+            # expected case for Codex/other-tool sessions) -- a genuinely
+            # absent field is a stronger signal ccusage's shape changed.
+            missing_agent_field += 1
+            continue
+        if entry["agent"] != CLAUDE_AGENT_NAME:
             continue
 
-        last_activity = entry["metadata"]["lastActivity"]
-        results.append(
-            SessionUsage(
-                session_id=entry["period"],
-                date=_date_from_iso(last_activity),
-                last_activity=last_activity,
-                input_tokens=entry["inputTokens"],
-                output_tokens=entry["outputTokens"],
-                cache_read_tokens=entry["cacheReadTokens"],
-                cache_creation_tokens=entry["cacheCreationTokens"],
-                cost_usd=entry["totalCost"],
-                total_tokens=entry["totalTokens"],
-                models_used=entry.get("modelsUsed", []),
+        try:
+            last_activity = entry["metadata"]["lastActivity"]
+            results.append(
+                SessionUsage(
+                    session_id=entry["period"],
+                    date=_date_from_iso(last_activity),
+                    last_activity=last_activity,
+                    input_tokens=entry["inputTokens"],
+                    output_tokens=entry["outputTokens"],
+                    cache_read_tokens=entry["cacheReadTokens"],
+                    cache_creation_tokens=entry["cacheCreationTokens"],
+                    cost_usd=entry["totalCost"],
+                    total_tokens=entry["totalTokens"],
+                    models_used=entry.get("modelsUsed", []),
+                )
             )
+        except KeyError as e:
+            raise CcusageError(
+                f"ccusage session output is missing an expected field ({e}) -- "
+                f"its JSON shape may have changed since this tool was built"
+            ) from e
+
+    if missing_agent_field:
+        plural = "y" if missing_agent_field == 1 else "ies"
+        print(
+            f"Warning: {missing_agent_field} session entr{plural} had no 'agent' field at all "
+            f"(not just a non-Claude one) -- ccusage's output shape may have changed; "
+            f"Claude Code sessions may be silently missing from this sync.",
+            file=sys.stderr,
         )
 
     return results

@@ -16,20 +16,12 @@ from pathlib import Path
 from metrics import (
     cache_efficiency_by_day,
     cache_efficiency_by_session,
+    friendly_date as _friendly_date,
     session_outliers,
     tokens_by_period,
+    week_label as _week_label,
 )
 from snapshot import DEFAULT_DB_PATH
-
-
-def _friendly_date(iso_date: str) -> str:
-    """"2026-07-07" -> "Jul 7" -- keeps message text plain-language
-    consistent with the dashboard, which uses the same format."""
-    try:
-        y, m, d = (int(x) for x in iso_date.split("-"))
-        return _date(y, m, d).strftime("%b %-d")
-    except (ValueError, IndexError):
-        return iso_date
 
 
 @dataclass
@@ -110,9 +102,16 @@ def rule_cost_trending_up(
     efficiency improvement usually just means more work got done, not
     waste."""
     weeks = tokens_by_period("week", db_path)
-    if len(weeks) < 3:
-        return []  # need at least 2 complete weeks + the current partial one to exclude it
-    complete_weeks = weeks[:-1]
+    if len(weeks) < 2:
+        return []
+    # Exclude the current week only if it's actually the one containing
+    # today -- weeks[-1] isn't reliably "in progress" (e.g. right after a
+    # week just ended, before any new-week data exists, weeks[-1] is
+    # already complete; blindly dropping it would compare the wrong pair).
+    today_week_label = _week_label(_date.today().isoformat())
+    complete_weeks = [w for w in weeks if w.period != today_week_label]
+    if len(complete_weeks) < 2:
+        return []
     prev_week, last_week = complete_weeks[-2], complete_weeks[-1]
 
     if prev_week.cost_usd <= 0:
@@ -140,16 +139,11 @@ def rule_cost_trending_up(
     )]
 
 
-def _avg_efficiency_in_week(daily_eff, week_label: str) -> float | None:
-    # tokens_by_period("week") groups by strftime('%Y-W%W', date); recompute
-    # the same label per day to match efficiency points into the same week.
-    matches = [d.efficiency for d in daily_eff if _week_label(d.key) == week_label and d.efficiency is not None]
+def _avg_efficiency_in_week(daily_eff, target_week_label: str) -> float | None:
+    # tokens_by_period("week") groups by the same label _week_label computes;
+    # recompute it per day to match efficiency points into the same week.
+    matches = [d.efficiency for d in daily_eff if _week_label(d.key) == target_week_label and d.efficiency is not None]
     return statistics.mean(matches) if matches else None
-
-
-def _week_label(date_str: str) -> str:
-    y, m, d = (int(x) for x in date_str.split("-"))
-    return _date(y, m, d).strftime("%Y-W%W")
 
 
 # --- Rule 4: approaching a configured weekly limit ----------------------
@@ -187,9 +181,15 @@ RULES = [rule_low_cache_reuse, rule_session_outliers, rule_cost_trending_up, rul
 
 
 def evaluate_all(db_path: Path = DEFAULT_DB_PATH, weekly_limit_usd: float | None = None) -> list[Recommendation]:
+    """Actually iterates RULES (previously this hardcoded the same four
+    calls a second time, so RULES could silently drift out of sync with
+    what's really evaluated -- a rule added to one and not the other
+    would be silently skipped). Only rule_approaching_weekly_limit needs
+    the extra weekly_limit_usd argument; every other rule takes just db_path."""
     recs: list[Recommendation] = []
-    recs.extend(rule_low_cache_reuse(db_path))
-    recs.extend(rule_session_outliers(db_path))
-    recs.extend(rule_cost_trending_up(db_path))
-    recs.extend(rule_approaching_weekly_limit(db_path, weekly_limit_usd))
+    for rule in RULES:
+        if rule is rule_approaching_weekly_limit:
+            recs.extend(rule(db_path, weekly_limit_usd=weekly_limit_usd))
+        else:
+            recs.extend(rule(db_path))
     return recs
